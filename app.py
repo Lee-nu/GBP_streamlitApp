@@ -4,13 +4,12 @@
 import streamlit as st
 import pandas as pd
 import time
-from sklearn.ensemble import RandomForestClassifier
 import pickle
-
-# === Blockchain classes (reuse from your notebook) ===
+from sklearn.ensemble import RandomForestClassifier
 import hashlib
 import json
 
+# === Blockchain classes ===
 class Block:
     def __init__(self, index, timestamp, data, previous_hash):
         self.index = index
@@ -51,17 +50,17 @@ class Blockchain:
     def display_chain(self):
         return [block.__dict__ for block in self.chain]
 
-# Initialize blockchain and (placeholder) model
-blockchain = Blockchain()
 
-# === Simulate loading a trained model and scaler (replace these with your actual model objects) ===
-# For demo, we assume model is trained and saved as 'rf_model.pkl' and scaler as 'scaler.pkl'
+# === Load model and scaler ===
 with open('rf_model.pkl', 'rb') as f:
     rf = pickle.load(f)
 with open('scaler.pkl', 'rb') as f:
     scaler = pickle.load(f)
 
-# === Streamlit Interface ===
+# === Initialize blockchain ===
+blockchain = Blockchain()
+
+# === Streamlit UI ===
 st.set_page_config(page_title="Britcoin Fraud Detector", layout="wide")
 st.title("Britcoin: Secure Digital GBP Fraud Detection")
 
@@ -72,36 +71,41 @@ newbalanceOrig = st.sidebar.number_input("New Balance Origin", min_value=0.0)
 type_encoded = st.sidebar.selectbox("Transaction Type", options=[("TRANSFER", 1), ("CASH_OUT", 0)])
 
 if st.sidebar.button("Submit Transaction"):
-    # Create input row with required features
+    # Prepare input
     input_data = {
+        'step': 1,
         'amount': amount,
         'oldbalanceOrg': oldbalanceOrg,
         'newbalanceOrig': newbalanceOrig,
-        'type_encoded': type_encoded[1],
-        'step': 1,  # default for simplicity
         'oldbalanceDest': 0,
         'newbalanceDest': 0,
+        'type_encoded': type_encoded[1],
         'balance_diff_orig': oldbalanceOrg - newbalanceOrig,
         'balance_diff_dest': 0,
         'amount_to_balance_ratio': amount / (oldbalanceOrg + 1),
         'zero_balance_orig': int(oldbalanceOrg == 0),
         'zero_balance_dest': 1
     }
-    input_df = pd.DataFrame([input_data])
-    input_scaled = scaler.transform(input_df)
-    prediction = rf.predict(input_scaled)[0]
 
-    st.subheader("Prediction Result")
-    if prediction == 1:
-        st.error("🚫 Fraudulent transaction detected!")
-    else:
-        st.success("✅ Legitimate transaction.")
+    try:
+        input_df = pd.DataFrame([input_data])
+        input_scaled = scaler.transform(input_df)
+        prediction = rf.predict(input_scaled)[0]
 
-    # Blockchain logging
-    result = blockchain.add_transaction(input_data, prediction)
-    st.info(result)
+        st.subheader("Prediction Result")
+        if prediction == 1:
+            st.error("🚫 Fraudulent transaction detected!")
+        else:
+            st.success("✅ Legitimate transaction.")
 
-# === Blockchain Ledger Display ===
+        # Blockchain record
+        result = blockchain.add_transaction(input_data, prediction)
+        st.info(result)
+
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+
+# Display blockchain
 st.subheader("Blockchain Ledger")
 ledger_df = pd.DataFrame(blockchain.display_chain())
 st.dataframe(ledger_df, use_container_width=True)
