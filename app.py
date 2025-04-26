@@ -1,23 +1,11 @@
-# ================================================
-# Britcoin: Secure Digital GBP Fraud Detection App
-# ================================================
-
 import streamlit as st
 import pandas as pd
+import time
 import pickle
 import hashlib
 import json
-import time
 
-# ===== Load models and scaler =====
-with open('rf_model.pkl', 'rb') as f:
-    rf_model = pickle.load(f)
-with open('xgb_model.pkl', 'rb') as f:
-    xgb_model = pickle.load(f)
-with open('scaler.pkl', 'rb') as f:
-    scaler = pickle.load(f)
-
-# ===== Define Blockchain Classes =====
+# === Blockchain classes ===
 class Block:
     def __init__(self, index, timestamp, data, previous_hash):
         self.index = index
@@ -44,83 +32,92 @@ class Blockchain:
         genesis_block = Block(0, str(time.time()), "Genesis Block", "0")
         self.chain.append(genesis_block)
 
-    def get_latest_block(self):
-        return self.chain[-1]
-
     def add_transaction(self, data, is_fraud):
         if is_fraud:
-            return "\U0001F6AB Transaction flagged as fraud and not added to blockchain."
-        last_block = self.get_latest_block()
+            return "🚫 Fraudulent transaction detected. Not added to blockchain."
+        last_block = self.chain[-1]
         new_block = Block(len(self.chain), str(time.time()), data, last_block.hash)
         self.chain.append(new_block)
-        return f"\U00002705 Transaction added. Block #{new_block.index} with Hash: {new_block.hash}"
+        return f"✅ Transaction added. Block #{new_block.index} with Hash: {new_block.hash}"
 
     def display_chain(self):
         return [block.__dict__ for block in self.chain]
 
-# ===== Initialize Blockchain =====
+# === Load models ===
+with open('rf_model.pkl', 'rb') as f:
+    rf_model = pickle.load(f)
+
+with open('xgb_model.pkl', 'rb') as f:
+    xgb_model = pickle.load(f)
+
+with open('scaler.pkl', 'rb') as f:
+    scaler = pickle.load(f)
+
+# === Streamlit App ===
+st.set_page_config(page_title="Britcoin Fraud Detection", layout="wide")
+st.title("💷 Britcoin: Secure Digital GBP Fraud Detection")
+
 blockchain = Blockchain()
 
-# ===== Streamlit UI =====
-st.set_page_config(page_title="Britcoin Fraud Detection", layout="wide")
-st.title("\U0001F4B5 Britcoin: Secure Digital GBP Fraud Detection")
-
-st.sidebar.header("\U0001F50D Enter Transaction Details")
-
+st.sidebar.header("🔵 Enter Transaction Details")
 amount = st.sidebar.number_input("Amount", min_value=0.0)
 oldbalanceOrg = st.sidebar.number_input("Old Balance Origin", min_value=0.0)
 newbalanceOrig = st.sidebar.number_input("New Balance Origin", min_value=0.0)
+type_selected = st.sidebar.selectbox("Transaction Type", options=[("TRANSFER", 1), ("CASH_OUT", 0)])
 
-transaction_type = st.sidebar.selectbox("Transaction Type", [("TRANSFER", 1), ("CASH_OUT", 0)])
-
-st.sidebar.header("\U0001F916 Choose Model")
 model_choice = st.sidebar.radio("Choose Model", ("Random Forest", "XGBoost"))
 
-if st.sidebar.button("\U0001F680 Submit Transaction"):
+if st.sidebar.button("🚀 Submit Transaction"):
+    # Correct feature list used during model training
+    feature_order = [
+        'amount', 'amount_to_balance_ratio', 'oldbalanceOrg', 'step',
+        'zero_balance_orig', 'zero_balance_dest', 'type_encoded',
+        'oldbalanceDest', 'newbalanceOrig', 'balance_diff_orig',
+        'balance_diff_dest', 'newbalanceDest'
+    ]
 
-    # === Build full input data
+    # Build full input row
     input_data = {
         'amount': amount,
         'oldbalanceOrg': oldbalanceOrg,
         'newbalanceOrig': newbalanceOrig,
-        'type_encoded': transaction_type[1],
+        'type_encoded': type_selected[1],
         'step': 1,
-        'oldbalanceDest': 0,
-        'newbalanceDest': 0,
+        'oldbalanceDest': 0.0,
+        'newbalanceDest': 0.0,
         'balance_diff_orig': oldbalanceOrg - newbalanceOrig,
-        'balance_diff_dest': 0,
+        'balance_diff_dest': 0.0,
         'amount_to_balance_ratio': amount / (oldbalanceOrg + 1),
-        'zero_balance_orig': int(oldbalanceOrg == 0),
+        'zero_balance_orig': 1 if oldbalanceOrg == 0 else 0,
         'zero_balance_dest': 1
     }
 
-    feature_order = [
-        'amount', 'oldbalanceOrg', 'newbalanceOrig', 'type_encoded', 'step',
-        'oldbalanceDest', 'newbalanceDest', 'balance_diff_orig', 'balance_diff_dest',
-        'amount_to_balance_ratio', 'zero_balance_orig', 'zero_balance_dest'
-    ]
+    input_df = pd.DataFrame([input_data])
 
-    input_df = pd.DataFrame([input_data])[feature_order]
+    # Arrange columns correctly
+    input_df = input_df[feature_order]
+
+    # Scale
     input_scaled = scaler.transform(input_df)
 
-    # === Prediction
+    # Predict
     if model_choice == "Random Forest":
         prediction = rf_model.predict(input_scaled)[0]
     else:
         prediction = xgb_model.predict(input_scaled)[0]
 
-    st.subheader("\U0001F4DD Prediction Result")
-
+    # Result
+    st.subheader("🎯 Prediction Result")
     if prediction == 1:
-        st.error("\U0001F6AB Fraudulent Transaction Detected!")
+        st.error("🚫 Fraudulent Transaction Detected!")
     else:
-        st.success("\U00002705 Legitimate Transaction.")
+        st.success("✅ Legitimate Transaction.")
 
-    # === Blockchain action
-    result = blockchain.add_transaction(input_data, prediction)
-    st.info(result)
+    # Blockchain
+    blockchain_result = blockchain.add_transaction(input_data, prediction)
+    st.info(blockchain_result)
 
-# ===== Display Blockchain Ledger =====
-st.subheader("\U0001F4C4 Blockchain Ledger")
-ledger_df = pd.DataFrame(blockchain.display_chain())
-st.dataframe(ledger_df, use_container_width=True)
+# === Blockchain Ledger Display ===
+st.subheader("📄 Blockchain Ledger")
+ledger = blockchain.display_chain()
+st.dataframe(pd.DataFrame(ledger))
